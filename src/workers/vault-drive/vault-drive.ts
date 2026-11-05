@@ -1,0 +1,272 @@
+import Hyperdrive from 'hyperdrive'
+import idEnc from 'hypercore-id-encoding'
+import b4a from 'b4a'
+
+import { normalizePath, joinPath } from './path-utils'
+import { uploadFile } from './uploader'
+import { downloadFile, readFileBuffer } from './downloader'
+
+class VaultDrive {
+  store: any
+  swarm: any
+  encryptionKey: Uint8Array | string
+  networkKeyHex: string | null
+  publicCatalog: any
+  blinds: any
+  chunkStore: any
+  drive: any
+  _discovery: any
+  identityHex: string | null
+
+  constructor({
+    store,
+    swarm,
+    encryptionKey,
+    networkKeyHex = null,
+    publicCatalog = null,
+    blinds = null,
+    chunkStore = null,
+    identityHex = null
+  }: {
+    store: any
+    swarm: any
+    encryptionKey: Uint8Array | string
+    networkKeyHex?: string | null
+    publicCatalog?: any
+    blinds?: any
+    chunkStore?: any
+    identityHex?: string | null
+  }) {
+    this.store = store
+    this.swarm = swarm
+    this.encryptionKey = encryptionKey
+    this.networkKeyHex = networkKeyHex
+    this.publicCatalog = publicCatalog
+    this.blinds = blinds
+    this.chunkStore = chunkStore
+    this.identityHex = identityHex
+    this.drive = null
+    this._discovery = null
+  }
+
+  async open() {
+    this.drive = new Hyperdrive(this.store.namespace('vault'), {
+      encryptionKey: this.encryptionKey
+    })
+    await this.drive.ready()
+    return this
+  }
+
+  get key() {
+    return this.drive?.key
+  }
+
+  get keyHex(): string | null {
+    return this.drive ? idEnc.normalize(this.drive.key) : null
+  }
+
+  async list(dir = '/') {
+    const folder = normalizePath(dir)
+    const names = new Map<string, any>()
+    const stream = this.drive.list(folder, { recursive: true })
+    for await (const entry of stream) {
+      if (entry.key === '/.share.json') continue
+      const rest = folder === '/' ? entry.key.slice(1) : entry.key.slice(folder.length + 1)
+      if (!rest) continue
+      const name = rest.split('/')[0]
+      if (!name || name === '.keep') continue
+      const full = joinPath(folder, name)
+      if (names.has(full)) continue
+      const exact = await this.drive.entry(full)
+      const fileNetKey = exact?.value?.metadata?.networkKeyHex
+      if (fileNetKey && this.networkKeyHex && fileNetKey !== this.networkKeyHex) {
+        continue
+      }
+      const isNestedOnly = rest.includes('/')
+      names.set(full, {
+        path: full,
+        name,
+        isDirectory: exact ? !exact.value.blob && !exact.value.linkname : isNestedOnly,
+        byteLength: exact?.value?.metadata?.originalSize || exact?.value?.blob?.byteLength || 0,
+        metadata: exact?.value?.metadata || null,
+        chunkCount: exact?.value?.metadata?.chunks?.length || 0,
+        isPrivate: exact?.value?.metadata?.isPrivate !== undefined ? Boolean(exact.value.metadata.isPrivate) : true,
+        uploaderIdentity: exact?.value?.metadata?.uploaderIdentity || this.identityHex || null,
+        isOwner: true
+      })
+    }
+
+    // Merge public catalog files for active network
+    if (this.publicCatalog && this.networkKeyHex) {
+      try {
+        const publicFiles = await this.publicCatalog.getPublicFiles(this.networkKeyHex)
+        for (const pubFile of publicFiles) {
+          if (!pubFile || !pubFile.path) continue
+          if (pubFile.networkKeyHex && pubFile.networkKeyHex !== this.networkKeyHex) continue
+          const rest = folder === '/' ? pubFile.path.slice(1) : pubFile.path.slice(folder.length + 1)
+          if (!rest) continue
+          const name = rest.split('/')[0]
+          if (!name || name === '.keep') continue
+          const full = joinPath(folder, name)
+          if (!names.has(full)) {
+            const isOwner = !pubFile.uploaderIdentity || (this.identityHex ? pubFile.uploaderIdentity === this.identityHex : true)
+            names.set(full, {
+              path: full,
+              name,
+              isDirectory: false,
+              byteLength: pubFile.originalSize || pubFile.byteLength || 0,
+              metadata: pubFile,
+              chunkCount: pubFile.chunks?.length || 0,
+              isPrivate: false,
+              uploaderIdentity: pubFile.uploaderIdentity || null,
+              isOwner
+            })
+          }
+        }
+      } catch {}
+    }
+
+    return [...names.values()].sort((a, b) => {
+      if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1
+      return a.name.localeCompare(b.name)
+    })
+  }
+
+  async mkdir(dirPath: string) {
+    const p = normalizePath(dirPath)
+    const keep = p === '/' ? '/.keep' : joinPath(p, '.keep')
+    await this.drive.put(keep, b4a.alloc(0), {
+      metadata: { directoryMarker: true, networkKeyHex: this.networkKeyHex }
+    })
+    return { path: p }
+  }
+
+  async upload(localPath: string, destPath: string, mime: string | null = null, isPrivate = true, uploaderIdentity: string | null = null) {
+    return uploadFile({
+      drive: this.drive,
+      chunkStore: this.chunkStore,
+      encryptionKey: this.encryptionKey,
+      networkKeyHex: this.networkKeyHex,
+      publicCatalog: this.publicCatalog,
+      localPath,
+      destPath,
+      mime,
+      isPrivate,
+      uploaderIdentity: uploaderIdentity || this.identityHex || null
+    })
+  }
+
+  async download(entryPath: string, destLocalPath: string) {
+    return downloadFile({
+      drive: this.drive,
+      chunkStore: this.chunkStore,
+      encryptionKey: this.encryptionKey,
+      networkKeyHex: this.networkKeyHex,
+      publicCatalog: this.publicCatalog,
+      entryPath,
+      destLocalPath
+    })
+  }
+
+  async readBuffer(entryPath: string) {
+    return readFileBuffer({
+      drive: this.drive,
+      chunkStore: this.chunkStore,
+      encryptionKey: this.encryptionKey,
+      networkKeyHex: this.networkKeyHex,
+      publicCatalog: this.publicCatalog,
+      entryPath
+    })
+  }
+
+  async delete(entryPath: string, callerIdentityHex: string | null = null) {
+    const p = normalizePath(entryPath)
+    await this.drive.ready()
+    const rawHashes: string[] = []
+    let detectedNetKey: string | null = null
+    const effectiveCaller = callerIdentityHex || this.identityHex
+
+    try {
+      const entry = await this.drive.entry(p)
+      if (entry?.value?.metadata?.networkKeyHex) {
+        detectedNetKey = entry.value.metadata.networkKeyHex
+      }
+      if (entry?.value?.metadata?.chunks && Array.isArray(entry.value.metadata.chunks)) {
+        for (const c of entry.value.metadata.chunks) {
+          if (c && c.hash) rawHashes.push(c.hash)
+        }
+      }
+    } catch {}
+
+    const effectiveNetKey = detectedNetKey || this.networkKeyHex
+
+    try {
+      if (this.publicCatalog && effectiveNetKey) {
+        const pubManifest = await this.publicCatalog.getPublicManifest(effectiveNetKey, p)
+        if (pubManifest) {
+          // Check uploader permission
+          if (pubManifest.uploaderIdentity && effectiveCaller && pubManifest.uploaderIdentity !== effectiveCaller) {
+            throw new Error('Permission denied: Only the original uploader can delete this public file.')
+          }
+          if (pubManifest.chunks && Array.isArray(pubManifest.chunks)) {
+            for (const c of pubManifest.chunks) {
+              if (c && c.hash) rawHashes.push(c.hash)
+            }
+          }
+        }
+      }
+    } catch (err: any) {
+      if (err?.message?.includes('Permission denied')) throw err
+    }
+
+    const chunkHashes = Array.from(new Set(rawHashes))
+
+    await this.drive.del(p)
+    if (this.publicCatalog && effectiveNetKey) {
+      await this.publicCatalog.removePublicFile(effectiveNetKey, p).catch(() => {})
+      if (this.chunkStore && typeof this.chunkStore.broadcastRemovePublicFile === 'function') {
+        await this.chunkStore.broadcastRemovePublicFile(p, effectiveNetKey).catch(() => {})
+      }
+    }
+
+    if (chunkHashes.length > 0 && this.chunkStore) {
+      console.log(`[VaultDrive:Delete] Purging locally & broadcasting deletion for ${chunkHashes.length} chunk(s) associated with ${p}`)
+      await this.chunkStore.purgeChunks(chunkHashes).catch(() => {})
+      await this.chunkStore.broadcastDeleteChunks(chunkHashes, effectiveNetKey).catch((err: any) => {
+        console.warn(`[VaultDrive:Delete] Broadcast delete warning:`, err?.message || err)
+      })
+    }
+
+    return { path: p }
+  }
+
+  async getManifest(entryPath: string) {
+    const p = normalizePath(entryPath)
+    await this.drive.ready()
+    const entry = await this.drive.entry(p)
+    const meta = entry?.value?.metadata
+    const rawChunks = meta?.chunks || []
+    const chunks = rawChunks.map((c: any, i: number) => ({
+      index: c.index !== undefined ? c.index : i,
+      offset: c.offset !== undefined ? c.offset : i * (64 * 1024),
+      length: c.length || 64 * 1024,
+      hash: c.hash
+    }))
+    return {
+      path: p,
+      byteLength: meta?.originalSize || 0,
+      mime: meta?.mime || null,
+      chunks,
+      metadata: meta || null
+    }
+  }
+
+  async close() {
+    if (this._discovery) await this._discovery.destroy().catch(() => {})
+    this._discovery = null
+    if (this.drive) await this.drive.close().catch(() => {})
+    this.drive = null
+  }
+}
+
+export { VaultDrive }
