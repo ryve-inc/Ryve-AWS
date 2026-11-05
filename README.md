@@ -13,28 +13,34 @@ Headless, terminal-only managed storage node daemon for the **Ryve P2P Encrypted
 
 ---
 
-## 2. Quick Start
+## 2. Build & Launch Commands
 
-### Build
+### 2.1 Build the Daemon & Worker
 ```bash
 npm run build
 ```
-This compiles:
-- `dist/daemon/index.js` (Node.js REST API daemon)
-- `dist/workers/main.cjs` (Bare P2P storage worker)
+*(Bundles `dist/daemon/index.js` and `dist/workers/main.cjs` in ~3 seconds).*
 
-### Run the Daemon
+### 2.2 Start the Daemon
+
+#### Option A: Quick Start (Default `./data/storage` on port `7890`)
 ```bash
 npm start
 ```
-Or with custom configuration:
+
+#### Option B: Custom Storage Directory & Port
 ```bash
-node dist/daemon/index.js --storage ./data/storage --port 7890 --host 0.0.0.0
+node dist/daemon/index.js --storage ./local-node-data --port 7890
+```
+
+#### Option C: Production Mode with API Authentication
+```bash
+node dist/daemon/index.js --storage /mnt/ryve-storage --port 7890 --api-key ryve_secret_token_123
 ```
 
 ---
 
-## 3. Configuration
+## 3. Configuration Reference
 
 Options can be supplied via command-line arguments or environment variables:
 
@@ -49,61 +55,91 @@ Options can be supplied via command-line arguments or environment variables:
 
 ---
 
-## 4. Portal REST API Reference
+## 4. Local Testing Guide (Step-by-Step)
 
-All requests and responses use JSON. When `--api-key` is configured, pass `Authorization: Bearer <secret>` header.
+Open two terminal windows to test locally.
 
-### 4.1 Health Check
-```http
-GET /health
+### Step 1: Start the Daemon (Terminal 1)
+```bash
+node dist/daemon/index.js --storage ./local-test-storage --port 7890
 ```
-**Response:**
+
+*Expected Terminal 1 Output:*
+```text
+================================================================
+       RYVE MANAGED STORAGE NODE DAEMON (HEADLESS)
+================================================================
+Persistent Storage Directory : C:\...\local-test-storage
+Portal Provisioning API Host : 0.0.0.0:7890
+Authentication               : None (Open Local/VPC)
+----------------------------------------------------------------
+NODE ID (Public Key) : 22863cbf985b32a1ec416f70fc9a070a1046...
+NODE STATUS          : ONLINE (Unlocked)
+CONNECTED PEERS      : 0
+ACTIVE NETWORKS      : 0
+DISK CAPACITY (FREE) : 28.19 GB
+================================================================
+[Daemon] Portal Provisioning API listening on http://0.0.0.0:7890
+[Daemon] Ready to accept storage provisioning requests.
+```
+
+---
+
+### Step 2: Query Health & Node Status (Terminal 2)
+
+#### Health Check
+
+**Windows (PowerShell):**
+```powershell
+curl.exe http://localhost:7890/health
+```
+
+**Linux / macOS (Bash):**
+```bash
+curl http://localhost:7890/health
+```
+
+**Expected JSON Response:**
 ```json
 {
   "status": "ok",
   "nodeReady": true,
-  "uptimeSeconds": 142,
+  "uptimeSeconds": 18,
   "timestamp": "2026-11-05T12:00:00.000Z"
 }
 ```
 
 ---
 
-### 4.2 Get Node Status & Networks
-```http
-GET /api/v1/node/status
+#### Get Node Status & Storage Overview
+
+**Windows (PowerShell):**
+```powershell
+curl.exe http://localhost:7890/api/v1/node/status
 ```
-**Response:**
+
+**Linux / macOS (Bash):**
+```bash
+curl http://localhost:7890/api/v1/node/status
+```
+
+**Expected JSON Response:**
 ```json
 {
   "success": true,
-  "nodeId": "d1493adf6f772311e3234cf166a7100941aa51100a79eb2da12270046c661d52",
+  "nodeId": "22863cbf985b32a1ec416f70fc9a070a1046...",
   "displayName": "Ryve-Managed-Storage-Node",
   "online": true,
-  "totalPeerCount": 4,
-  "networksCount": 1,
-  "networks": [
-    {
-      "id": "a1b2c3d4e5f6",
-      "name": "Customer-Acme",
-      "networkKeyHex": "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90",
-      "networkLink": "p2p-drive://network/a1b2c3d4e5f6...",
-      "peers": 3,
-      "allocatedBytes": 107374182400,
-      "allocatedGb": 100,
-      "usedBytes": 45219800,
-      "usedMb": 43.12,
-      "availableBytes": 107328962600,
-      "utilizationPercent": 0.04
-    }
-  ],
+  "totalPeerCount": 0,
+  "networksCount": 0,
+  "networks": [],
   "storage": {
-    "totalAllocatedBytes": 107374182400,
-    "totalAllocatedGb": 100,
-    "totalUsedBytes": 45219800,
-    "totalUsedMb": 43.12,
-    "totalFreeDiskBytes": 850000000000,
-    "totalFreeDiskGb": 791.62,
+    "totalAllocatedBytes": 0,
+    "totalAllocatedGb": 0,
+    "totalUsedBytes": 0,
+    "totalUsedMb": 0,
+    "totalFreeDiskBytes": 30254411776,
+    "totalFreeDiskGb": 28.18,
     "reservedSystemBytes": 2147483648
   }
 }
@@ -111,67 +147,171 @@ GET /api/v1/node/status
 
 ---
 
-### 4.3 Provision / Join Network
-Called by the Portal when a customer orders storage for a network.
+### Step 3: Provision / Join Customer Network
 
-```http
-POST /api/v1/node/join-network
-Content-Type: application/json
+Simulate what the Ryve Portal backend does when a customer purchases storage for their network.
 
-{
-  "networkLink": "p2p-drive://network/<64_char_hex>?name=Customer-Acme",
-  "name": "Customer-Acme",
-  "allocatedGb": 100
-}
+> **Note:** Replace the `networkLink` with any valid 64-character hex link from your Ryve network, or use the sample link below.
+
+#### Windows (PowerShell):
+```powershell
+curl.exe -X POST http://localhost:7890/api/v1/node/join-network `
+  -H "Content-Type: application/json" `
+  -d '{\"networkLink\":\"p2p-drive://network/a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90?name=Customer-Acme\",\"name\":\"Customer-Acme\",\"allocatedGb\":5}'
 ```
-**Response:**
+
+#### Linux / macOS (Bash):
+```bash
+curl -X POST http://localhost:7890/api/v1/node/join-network \
+  -H "Content-Type: application/json" \
+  -d '{
+    "networkLink": "p2p-drive://network/a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90?name=Customer-Acme",
+    "name": "Customer-Acme",
+    "allocatedGb": 5
+  }'
+```
+
+**Expected JSON Response:**
 ```json
 {
   "success": true,
-  "message": "Node successfully joined network and allocated 100.00 GB",
+  "message": "Node successfully joined network and allocated 5.00 GB",
   "networkId": "a1b2c3d4e5f6",
   "networkKeyHex": "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90",
   "networkLink": "p2p-drive://network/a1b2c3d4e5f6...",
-  "allocatedBytes": 107374182400,
-  "allocatedGb": 100
+  "allocatedBytes": 5368709120,
+  "allocatedGb": 5
 }
+```
+
+*In Terminal 1 (Daemon logs), you will see:*
+```text
+[WorkerBridge] Joining network: p2p-drive://network/a1b2c3d4e5... (Allocating 5.00 GB)
+[ChunkStore] Joined chunk topic for network a1b2c3d4e5f6
+[P2PNetwork] Joined network a1b2c3d4e5f6 swarm topics (total joined: 1)
 ```
 
 ---
 
-### 4.4 Upgrade / Resize Network Storage
-```http
-POST /api/v1/node/resize-network
-Content-Type: application/json
+### Step 4: Upgrade Storage Capacity (Resize Network)
 
-{
-  "networkId": "a1b2c3d4e5f6",
-  "allocatedGb": 500
-}
+When the customer upgrades their storage plan (e.g. from 5 GB to 10 GB):
+
+#### Windows (PowerShell):
+```powershell
+curl.exe -X POST http://localhost:7890/api/v1/node/resize-network `
+  -H "Content-Type: application/json" `
+  -d '{\"networkId\":\"a1b2c3d4e5f6\",\"allocatedGb\":10}'
 ```
-**Response:**
+
+#### Linux / macOS (Bash):
+```bash
+curl -X POST http://localhost:7890/api/v1/node/resize-network \
+  -H "Content-Type: application/json" \
+  -d '{
+    "networkId": "a1b2c3d4e5f6",
+    "allocatedGb": 10
+  }'
+```
+
+**Expected JSON Response:**
 ```json
 {
   "success": true,
   "message": "Storage allocation updated for network a1b2c3d4e5f6",
   "networkId": "a1b2c3d4e5f6",
-  "newAllocatedBytes": 536870912000,
-  "newAllocatedGb": 500
+  "newAllocatedBytes": 10737418240,
+  "newAllocatedGb": 10
 }
 ```
 
 ---
 
-### 4.5 Leave / Decommission Network
-```http
-POST /api/v1/node/leave-network
-Content-Type: application/json
+### Step 5: Verify Updated Status & Usage
 
+#### Windows (PowerShell):
+```powershell
+curl.exe http://localhost:7890/api/v1/node/status
+```
+
+#### Linux / macOS (Bash):
+```bash
+curl http://localhost:7890/api/v1/node/status
+```
+
+**Expected JSON Response:**
+```json
 {
-  "networkId": "a1b2c3d4e5f6"
+  "success": true,
+  "nodeId": "22863cbf985b32a1ec416f70fc9a070a1046...",
+  "displayName": "Ryve-Managed-Storage-Node",
+  "online": true,
+  "totalPeerCount": 0,
+  "networksCount": 1,
+  "networks": [
+    {
+      "id": "a1b2c3d4e5f6",
+      "name": "Customer-Acme",
+      "networkKeyHex": "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90",
+      "networkLink": "p2p-drive://network/a1b2c3d4e5f6...",
+      "peers": 0,
+      "allocatedBytes": 10737418240,
+      "allocatedGb": 10,
+      "usedBytes": 0,
+      "usedMb": 0,
+      "availableBytes": 10737418240,
+      "utilizationPercent": 0
+    }
+  ],
+  "storage": {
+    "totalAllocatedBytes": 10737418240,
+    "totalAllocatedGb": 10,
+    "totalUsedBytes": 0,
+    "totalUsedMb": 0,
+    "totalFreeDiskBytes": 30254411776,
+    "totalFreeDiskGb": 28.18,
+    "reservedSystemBytes": 2147483648
+  }
 }
 ```
-**Response:**
+
+---
+
+### Step 6: Query Detailed Storage Breakdown
+
+#### Windows (PowerShell):
+```powershell
+curl.exe http://localhost:7890/api/v1/node/storage
+```
+
+#### Linux / macOS (Bash):
+```bash
+curl http://localhost:7890/api/v1/node/storage
+```
+
+---
+
+### Step 7: Decommission / Leave Network
+
+When a customer removes storage or cancels their subscription:
+
+#### Windows (PowerShell):
+```powershell
+curl.exe -X POST http://localhost:7890/api/v1/node/leave-network `
+  -H "Content-Type: application/json" `
+  -d '{\"networkId\":\"a1b2c3d4e5f6\"}'
+```
+
+#### Linux / macOS (Bash):
+```bash
+curl -X POST http://localhost:7890/api/v1/node/leave-network \
+  -H "Content-Type: application/json" \
+  -d '{
+    "networkId": "a1b2c3d4e5f6"
+  }'
+```
+
+**Expected JSON Response:**
 ```json
 {
   "success": true,
@@ -182,85 +322,49 @@ Content-Type: application/json
 
 ---
 
-## 5. How to Test Locally
+## 5. Testing with API Key Authentication (Optional)
 
-### Step 1: Start the Daemon in Terminal 1
+If running the daemon with an API key:
 ```bash
-npm start -- --storage ./local-test-storage --port 7890
-```
-The terminal will display:
-```text
-================================================================
-       RYVE MANAGED STORAGE NODE DAEMON (HEADLESS)
-================================================================
-Persistent Storage Directory : C:\...\local-test-storage
-Portal Provisioning API Host : 0.0.0.0:7890
-Authentication               : None (Open Local/VPC)
-----------------------------------------------------------------
-NODE ID (Public Key) : 8f4ca...
-NODE STATUS          : ONLINE (Unlocked)
-CONNECTED PEERS      : 0
-ACTIVE NETWORKS      : 0
-DISK CAPACITY (FREE) : 28.19 GB
-================================================================
-[Daemon] Portal Provisioning API listening on http://0.0.0.0:7890
-[Daemon] Ready to accept storage provisioning requests.
+node dist/daemon/index.js --port 7890 --api-key my_portal_secret
 ```
 
-### Step 2: Query Health & Status in Terminal 2
+Pass the `Authorization: Bearer <secret>` header in your requests:
+
+#### Windows (PowerShell):
+```powershell
+curl.exe -H "Authorization: Bearer my_portal_secret" http://localhost:7890/api/v1/node/status
+```
+
+#### Linux / macOS (Bash):
 ```bash
-# Health check
-curl http://localhost:7890/health
-
-# Check initial node status
-curl http://localhost:7890/api/v1/node/status
-```
-
-### Step 3: Simulate Portal Provisioning (Join Network)
-Use any Ryve network link (from your desktop app or generate a test 64-character hex link):
-```bash
-curl -X POST http://localhost:7890/api/v1/node/join-network \
-  -H "Content-Type: application/json" \
-  -d '{
-    "networkLink": "p2p-drive://network/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef?name=MyTestNetwork",
-    "name": "MyTestNetwork",
-    "allocatedGb": 5
-  }'
-```
-You will see Terminal 1 announce:
-```text
-[WorkerBridge] Joining network: p2p-drive://network/0123456789... (Allocating 5.00 GB)
-[ChunkStore] Joined chunk topic for network 0123456789ab
-[P2PNetwork] Joined network 0123456789ab swarm topics
-```
-
-### Step 4: Test Storage Resizing (Upgrade to 10 GB)
-```bash
-curl -X POST http://localhost:7890/api/v1/node/resize-network \
-  -H "Content-Type: application/json" \
-  -d '{
-    "networkId": "0123456789ab",
-    "allocatedGb": 10
-  }'
-```
-
-### Step 5: Test Network Removal
-```bash
-curl -X POST http://localhost:7890/api/v1/node/leave-network \
-  -H "Content-Type: application/json" \
-  -d '{
-    "networkId": "0123456789ab"
-  }'
+curl -H "Authorization: Bearer my_portal_secret" http://localhost:7890/api/v1/node/status
 ```
 
 ---
 
-## 6. AWS Deployment Guide
+## 6. AWS Production Deployment Guide
 
-1. **EC2 Instance**: Launch an Ubuntu / Amazon Linux 2023 instance (e.g. `t3.medium` or `c6i.large`).
-2. **EBS Volume**: Attach an EBS volume formatted with XFS or ext4 mounted at `/mnt/ryve-storage`.
-3. **Node Runtime**: Install Node.js 20+.
-4. **Systemd Service (`/etc/systemd/system/ryve-node.service`)**:
+### 1. Launch EC2 Instance
+- **OS**: Ubuntu 22.04 LTS / 24.04 LTS or Amazon Linux 2023.
+- **Instance Type**: `t3.medium` (or larger depending on network count).
+- **Storage**: Attach an EBS gp3 volume formatted with ext4/XFS, mounted to `/mnt/ryve-storage`.
+
+### 2. Install Node.js 20+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+```
+
+### 3. Deploy Code & Build
+```bash
+cd /opt/ryve-node
+npm ci --omit=dev
+npm run build
+```
+
+### 4. Create Systemd Service
+Create `/etc/systemd/system/ryve-node.service`:
 ```ini
 [Unit]
 Description=Ryve Managed Storage Node Daemon
@@ -278,6 +382,14 @@ LimitNOFILE=65536
 [Install]
 WantedBy=multi-user.target
 ```
-5. **Security Groups**:
-   - Keep port `7890` private to your VPC / Ryve Portal backend.
-   - Allow outbound UDP/TCP for Hyperswarm P2P discovery and chunk replication.
+
+Enable and start the service:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now ryve-node
+sudo journalctl -u ryve-node -f
+```
+
+### 5. AWS Security Group Rules
+- **Port 7890 (TCP)**: Restrict to VPC CIDR / Ryve Portal Backend IP only.
+- **Outbound (TCP/UDP)**: Allow outbound internet traffic for Hyperswarm DHT discovery and peer chunk replication.
