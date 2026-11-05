@@ -195,16 +195,37 @@ curl -X POST http://localhost:7890/api/v1/node/join-network \
 
 ### Step 4: Upgrade Storage Capacity (Resize Network)
 
-When the customer upgrades their storage plan (e.g. from 5 GB to 10 GB):
+When the customer upgrades their storage plan (e.g. from 5 GB to 10 GB). **You can pass either the `networkLink` or the `networkId`**:
 
-#### Windows (PowerShell):
+#### Option A: Using `networkLink` (Easiest)
+
+**Windows (PowerShell):**
+```powershell
+curl.exe -X POST http://localhost:7890/api/v1/node/resize-network `
+  -H "Content-Type: application/json" `
+  -d '{\"networkLink\":\"p2p-drive://network/a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90?name=Customer-Acme\",\"allocatedGb\":10}'
+```
+
+**Linux / macOS (Bash):**
+```bash
+curl -X POST http://localhost:7890/api/v1/node/resize-network \
+  -H "Content-Type: application/json" \
+  -d '{
+    "networkLink": "p2p-drive://network/a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90?name=Customer-Acme",
+    "allocatedGb": 10
+  }'
+```
+
+#### Option B: Using `networkId`
+
+**Windows (PowerShell):**
 ```powershell
 curl.exe -X POST http://localhost:7890/api/v1/node/resize-network `
   -H "Content-Type: application/json" `
   -d '{\"networkId\":\"a1b2c3d4e5f6\",\"allocatedGb\":10}'
 ```
 
-#### Linux / macOS (Bash):
+**Linux / macOS (Bash):**
 ```bash
 curl -X POST http://localhost:7890/api/v1/node/resize-network \
   -H "Content-Type: application/json" \
@@ -218,10 +239,11 @@ curl -X POST http://localhost:7890/api/v1/node/resize-network \
 ```json
 {
   "success": true,
-  "message": "Storage allocation updated for network a1b2c3d4e5f6",
+  "message": "Storage allocation updated to 10.00 GB",
   "networkId": "a1b2c3d4e5f6",
-  "newAllocatedBytes": 10737418240,
-  "newAllocatedGb": 10
+  "networkKeyHex": "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90",
+  "allocatedBytes": 10737418240,
+  "allocatedGb": 10
 }
 ```
 
@@ -293,16 +315,36 @@ curl http://localhost:7890/api/v1/node/storage
 
 ### Step 7: Decommission / Leave Network
 
-When a customer removes storage or cancels their subscription:
+When a customer removes storage or cancels their subscription. **You can pass either `networkLink` or `networkId`**:
 
-#### Windows (PowerShell):
+#### Option A: Using `networkLink` (Easiest)
+
+**Windows (PowerShell):**
+```powershell
+curl.exe -X POST http://localhost:7890/api/v1/node/leave-network `
+  -H "Content-Type: application/json" `
+  -d '{\"networkLink\":\"p2p-drive://network/a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90?name=Customer-Acme\"}'
+```
+
+**Linux / macOS (Bash):**
+```bash
+curl -X POST http://localhost:7890/api/v1/node/leave-network \
+  -H "Content-Type: application/json" \
+  -d '{
+    "networkLink": "p2p-drive://network/a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90?name=Customer-Acme"
+  }'
+```
+
+#### Option B: Using `networkId`
+
+**Windows (PowerShell):**
 ```powershell
 curl.exe -X POST http://localhost:7890/api/v1/node/leave-network `
   -H "Content-Type: application/json" `
   -d '{\"networkId\":\"a1b2c3d4e5f6\"}'
 ```
 
-#### Linux / macOS (Bash):
+**Linux / macOS (Bash):**
 ```bash
 curl -X POST http://localhost:7890/api/v1/node/leave-network \
   -H "Content-Type: application/json" \
@@ -316,7 +358,8 @@ curl -X POST http://localhost:7890/api/v1/node/leave-network \
 {
   "success": true,
   "message": "Node successfully left network a1b2c3d4e5f6",
-  "networkId": "a1b2c3d4e5f6"
+  "networkId": "a1b2c3d4e5f6",
+  "networkKeyHex": "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90"
 }
 ```
 

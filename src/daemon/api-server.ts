@@ -89,6 +89,25 @@ export class ApiServer {
     return token === this.apiKey
   }
 
+  private parseCapacityBytes(body: any, defaultGb = 100): number {
+    const rawBytes = body.allocatedBytes
+    const rawGb = body.allocatedGb ?? body.requestedCapacityGb ?? body.newCapacityGb
+
+    if (typeof rawBytes === 'number' && rawBytes > 0) {
+      return Math.round(rawBytes)
+    }
+    if (typeof rawBytes === 'string' && parseFloat(rawBytes) > 0) {
+      return Math.round(parseFloat(rawBytes))
+    }
+    if (typeof rawGb === 'number' && rawGb > 0) {
+      return Math.round(rawGb * 1024 * 1024 * 1024)
+    }
+    if (typeof rawGb === 'string' && parseFloat(rawGb) > 0) {
+      return Math.round(parseFloat(rawGb) * 1024 * 1024 * 1024)
+    }
+    return Math.round(defaultGb * 1024 * 1024 * 1024)
+  }
+
   private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse) {
     // Handle CORS preflight
     if (req.method === 'OPTIONS') {
@@ -184,23 +203,15 @@ export class ApiServer {
         const body = await this.parseBody(req)
         const networkLink = body.networkLink || body.link
         if (!networkLink || typeof networkLink !== 'string') {
-          this.sendError(res, 400, "Missing required parameter 'networkLink'")
+          this.sendError(res, 400, "Missing required parameter: provide 'networkLink' or 'link'")
           return
         }
 
-        let allocatedBytes = 100 * 1024 * 1024 * 1024 // default 100 GB
-        if (typeof body.allocatedBytes === 'number' && body.allocatedBytes > 0) {
-          allocatedBytes = body.allocatedBytes
-        } else if (typeof body.allocatedGb === 'number' && body.allocatedGb > 0) {
-          allocatedBytes = body.allocatedGb * 1024 * 1024 * 1024
-        } else if (typeof body.requestedCapacityGb === 'number' && body.requestedCapacityGb > 0) {
-          allocatedBytes = body.requestedCapacityGb * 1024 * 1024 * 1024
-        }
-
+        const allocatedBytes = this.parseCapacityBytes(body, 100)
         const result = await this.bridge.joinNetwork(networkLink, body.name, allocatedBytes)
         this.sendJson(res, 200, {
           success: true,
-          message: `Node successfully joined network and allocated ${(allocatedBytes / 1e9).toFixed(2)} GB`,
+          message: `Node successfully joined network and allocated ${(result.allocatedBytes / 1e9).toFixed(2)} GB`,
           networkId: result.networkId,
           networkKeyHex: result.networkKeyHex,
           networkLink: result.networkLink,
@@ -213,31 +224,26 @@ export class ApiServer {
       // 4. POST /api/v1/node/resize-network
       if (req.method === 'POST' && pathname === '/api/v1/node/resize-network') {
         const body = await this.parseBody(req)
-        const networkId = body.networkId || body.id
-        if (!networkId || typeof networkId !== 'string') {
-          this.sendError(res, 400, "Missing required parameter 'networkId'")
+        const networkIdentifier = body.networkLink || body.link || body.networkKeyHex || body.networkId || body.id
+        if (!networkIdentifier || typeof networkIdentifier !== 'string') {
+          this.sendError(res, 400, "Missing required network identifier: provide 'networkLink', 'link', or 'networkId'")
           return
         }
 
-        let allocatedBytes = 0
-        if (typeof body.allocatedBytes === 'number' && body.allocatedBytes > 0) {
-          allocatedBytes = body.allocatedBytes
-        } else if (typeof body.allocatedGb === 'number' && body.allocatedGb > 0) {
-          allocatedBytes = body.allocatedGb * 1024 * 1024 * 1024
-        } else if (typeof body.newCapacityGb === 'number' && body.newCapacityGb > 0) {
-          allocatedBytes = body.newCapacityGb * 1024 * 1024 * 1024
-        } else {
-          this.sendError(res, 400, "Missing or invalid 'allocatedBytes' or 'allocatedGb'")
+        const allocatedBytes = this.parseCapacityBytes(body, 0)
+        if (allocatedBytes <= 0) {
+          this.sendError(res, 400, "Missing or invalid storage capacity: provide 'allocatedGb' or 'allocatedBytes' as a positive value")
           return
         }
 
-        await this.bridge.resizeNetwork(networkId, allocatedBytes)
+        const result = await this.bridge.resizeNetwork(networkIdentifier, allocatedBytes)
         this.sendJson(res, 200, {
           success: true,
-          message: `Storage allocation updated for network ${networkId}`,
-          networkId,
-          newAllocatedBytes: allocatedBytes,
-          newAllocatedGb: Math.round((allocatedBytes / (1024 * 1024 * 1024)) * 100) / 100
+          message: `Storage allocation updated to ${(result.allocatedBytes / 1e9).toFixed(2)} GB`,
+          networkId: result.networkId,
+          networkKeyHex: result.networkKeyHex,
+          allocatedBytes: result.allocatedBytes,
+          allocatedGb: Math.round((result.allocatedBytes / (1024 * 1024 * 1024)) * 100) / 100
         })
         return
       }
@@ -245,17 +251,18 @@ export class ApiServer {
       // 5. POST /api/v1/node/leave-network
       if (req.method === 'POST' && pathname === '/api/v1/node/leave-network') {
         const body = await this.parseBody(req)
-        const networkId = body.networkId || body.id
-        if (!networkId || typeof networkId !== 'string') {
-          this.sendError(res, 400, "Missing required parameter 'networkId'")
+        const networkIdentifier = body.networkLink || body.link || body.networkKeyHex || body.networkId || body.id
+        if (!networkIdentifier || typeof networkIdentifier !== 'string') {
+          this.sendError(res, 400, "Missing required network identifier: provide 'networkLink', 'link', or 'networkId'")
           return
         }
 
-        await this.bridge.leaveNetwork(networkId)
+        const result = await this.bridge.leaveNetwork(networkIdentifier)
         this.sendJson(res, 200, {
           success: true,
-          message: `Node successfully left network ${networkId}`,
-          networkId
+          message: `Node successfully left network ${result.networkId}`,
+          networkId: result.networkId,
+          networkKeyHex: result.networkKeyHex
         })
         return
       }

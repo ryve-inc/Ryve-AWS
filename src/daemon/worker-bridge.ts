@@ -300,21 +300,55 @@ export class WorkerBridge extends EventEmitter {
     }
   }
 
-  async resizeNetwork(networkId: string, allocatedBytes: number): Promise<AppStatus> {
-    console.log(`[WorkerBridge] Resizing network ${networkId} allocation to ${(allocatedBytes / 1e9).toFixed(2)} GB`)
-    const res = await this.callRpc<AppStatus>('setNetworkStorageAllocation', {
-      id: networkId,
+  async resizeNetwork(networkIdentifier: string, allocatedBytes: number): Promise<{
+    networkId: string
+    networkKeyHex: string
+    allocatedBytes: number
+    status: AppStatus
+  }> {
+    console.log(`[WorkerBridge] Resizing network '${networkIdentifier.slice(0, 30)}...' to ${(allocatedBytes / 1e9).toFixed(2)} GB`)
+    const res = await this.callRpc<{
+      ok: boolean
+      networkId: string
+      networkKeyHex: string
+      allocatedBytes: number
+      requestedBytes: number
+      status: AppStatus
+    }>('setNetworkStorageAllocation', {
+      id: networkIdentifier,
+      networkLink: networkIdentifier,
       allocatedBytes
     })
-    this.currentStatus = res
-    return res
+    this.currentStatus = res.status
+    return {
+      networkId: res.networkId,
+      networkKeyHex: res.networkKeyHex,
+      allocatedBytes: res.allocatedBytes,
+      status: res.status
+    }
   }
 
-  async leaveNetwork(networkId: string): Promise<AppStatus> {
-    console.log(`[WorkerBridge] Leaving network: ${networkId}`)
-    const res = await this.callRpc<AppStatus>('removeNetwork', { id: networkId })
-    this.currentStatus = res
-    return res
+  async leaveNetwork(networkIdentifier: string): Promise<{
+    networkId: string
+    networkKeyHex: string
+    status: AppStatus
+  }> {
+    console.log(`[WorkerBridge] Leaving network: '${networkIdentifier.slice(0, 30)}...'`)
+    const res = await this.callRpc<{
+      ok: boolean
+      networkId: string
+      networkKeyHex: string
+      status: AppStatus
+    }>('removeNetwork', {
+      id: networkIdentifier,
+      networkLink: networkIdentifier
+    })
+    this.currentStatus = res.status
+    return {
+      networkId: res.networkId,
+      networkKeyHex: res.networkKeyHex,
+      status: res.status
+    }
   }
 
   async close(): Promise<void> {

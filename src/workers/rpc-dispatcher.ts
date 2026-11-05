@@ -32,8 +32,46 @@ export const mutateMethods = new Set([
   'mkdir',
   'setBlindPeers',
   'setStorageQuota',
-  'setNetworkStorageAllocation'
+  'setNetworkStorageAllocation',
+  'removeNetwork'
 ])
+
+export function findTargetNetwork(state: State, identifier?: string): any | null {
+  if (!identifier || typeof identifier !== 'string') return null
+  const trimmed = identifier.trim()
+  if (!trimmed) return null
+
+  // 1. Direct match by id, networkKeyHex, or networkLink
+  let target = state.networks.find(
+    (n) =>
+      n.id === trimmed ||
+      n.networkKeyHex.toLowerCase() === trimmed.toLowerCase() ||
+      n.networkLink === trimmed
+  )
+  if (target) return target
+
+  // 2. Parse as link if contains URL pattern or hex
+  try {
+    const { networkKeyHex } = parseNetworkLink(trimmed)
+    if (networkKeyHex) {
+      target = state.networks.find(
+        (n) =>
+          n.networkKeyHex.toLowerCase() === networkKeyHex.toLowerCase() ||
+          n.id === networkKeyHex.slice(0, 12)
+      )
+      if (target) return target
+    }
+  } catch {}
+
+  // 3. Match by partial or substring
+  target = state.networks.find(
+    (n) =>
+      trimmed.includes(n.networkKeyHex) ||
+      trimmed.includes(n.id) ||
+      (trimmed.length >= 12 && n.networkKeyHex.toLowerCase().startsWith(trimmed.toLowerCase()))
+  )
+  return target || null
+}
 
 export function inferMimeType(name: string, fallbackMime: string | null): string {
   if (fallbackMime && fallbackMime !== 'application/octet-stream') return fallbackMime
@@ -341,25 +379,32 @@ export function createRpcHandlers(
       return statusPayload(state)
     },
 
-    async removeNetwork({ id }: { id: string }) {
-      const targetNet = state.networks.find((n) => n.id === id)
-      const handles = state.joinedTopics.get(id)
+    async removeNetwork({ id, networkLink, link }: { id?: string; networkLink?: string; link?: string }) {
+      const targetNet = findTargetNetwork(state, id || networkLink || link)
+      if (!targetNet) {
+        throw new Error(`Network not found for identifier: ${id || networkLink || link}`)
+      }
+
+      const netId = targetNet.id
+      const netKey = targetNet.networkKeyHex
+
+      const handles = state.joinedTopics.get(netId)
       if (handles) {
         await handles.networkDiscovery.destroy().catch(() => { })
         await handles.chunkDiscovery.destroy().catch(() => { })
-        state.joinedTopics.delete(id)
-        if (state.chunkStore) {
-          await state.chunkStore.leaveNetwork(id)
-        }
+        state.joinedTopics.delete(netId)
+      }
+      if (state.chunkStore) {
+        await state.chunkStore.leaveNetwork(netId)
       }
 
-      state.networks = state.networks.filter((n) => n.id !== id)
+      state.networks = state.networks.filter((n) => n.id !== netId && n.networkKeyHex !== netKey)
       await saveNetworks(storageDir, state.networks)
       if (state.storageManager) {
-        state.storageManager.removeNetwork(id, targetNet?.networkKeyHex)
+        state.storageManager.removeNetwork(netId, netKey)
       }
 
-      if (state.activeNetworkId === id) {
+      if (state.activeNetworkId === netId) {
         if (state.networks.length > 0) {
           const nextNet = state.networks[0]
           state.activeNetworkId = nextNet.id
@@ -374,7 +419,12 @@ export function createRpcHandlers(
           state.topicHex = null
         }
       }
-      return statusPayload(state)
+      return {
+        ok: true,
+        networkId: netId,
+        networkKeyHex: netKey,
+        status: statusPayload(state)
+      }
     },
 
     async createAccount() {
@@ -528,26 +578,48 @@ export function createRpcHandlers(
       return statusPayload(state)
     },
 
-    async setNetworkStorageAllocation({ id, allocatedBytes }: { id: string; allocatedBytes: number }) {
-      if (!id || typeof allocatedBytes !== 'number' || allocatedBytes <= 0) {
-        throw new Error('Invalid storage allocation parameters.')
+    async setNetworkStorageAllocation({
+      id,
+      networkLink,
+      link,
+      allocatedBytes
+    }: {
+      id?: string
+      networkLink?: string
+      link?: string
+      allocatedBytes: number
+    }) {
+      const targetNet = findTargetNetwork(state, id || networkLink || link)
+      if (!targetNet) {
+        throw new Error(`Network not found for identifier: ${id || networkLink || link}`)
+      }
+      if (typeof allocatedBytes !== 'number' || allocatedBytes <= 0) {
+        throw new Error('Invalid storage allocation parameters. Must be a positive number of bytes.')
       }
       if (!state.storageManager) throw new Error('Storage manager not initialized')
-      const res = await state.storageManager.setNetworkAllocation(id, allocatedBytes, state.networks)
-      const idx = state.networks.findIndex((n) => n.id === id)
-      if (idx >= 0) {
-        state.networks[idx].allocatedBytes = res.allocatedBytes
-        await saveNetworks(storageDir, state.networks)
 
-        const netKey = state.networks[idx].networkKeyHex
-        if (netKey && state.chunkStore) {
-          const used = state.storageManager.getUsedBytesForNetwork(netKey)
-          const avail = await state.storageManager.getAvailableBytesForNetwork(netKey)
-          state.chunkStore.broadcastStorageUpdate(netKey, res.allocatedBytes, used, avail).catch(() => {})
-        }
+      const netId = targetNet.id
+      const netKey = targetNet.networkKeyHex
+
+      const res = await state.storageManager.setNetworkAllocation(netId, allocatedBytes, state.networks)
+      targetNet.allocatedBytes = res.allocatedBytes
+      await saveNetworks(storageDir, state.networks)
+
+      if (netKey && state.chunkStore) {
+        const used = state.storageManager.getUsedBytesForNetwork(netKey)
+        const avail = await state.storageManager.getAvailableBytesForNetwork(netKey)
+        state.chunkStore.broadcastStorageUpdate(netKey, res.allocatedBytes, used, avail).catch(() => {})
       }
+
       emit({ type: 'event', name: 'status', data: statusPayload(state) })
-      return statusPayload(state)
+      return {
+        ok: true,
+        networkId: netId,
+        networkKeyHex: netKey,
+        allocatedBytes: res.allocatedBytes,
+        requestedBytes: allocatedBytes,
+        status: statusPayload(state)
+      }
     },
 
     async setStorageQuota({ mode, quotaBytes }: { mode: 'limited' | 'all'; quotaBytes?: number }) {
