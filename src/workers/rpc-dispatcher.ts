@@ -19,6 +19,8 @@ import type { State } from './state'
 import { statusPayload } from './state'
 import { joinNetworkTopics, joinAllSavedNetworks } from './network-manager'
 import { openVault, closeVault } from './vault-lifecycle'
+import { inferMimeType } from './mime'
+import { formatFilePreview } from './preview'
 
 export const mutateMethods = new Set([
   'createNetwork',
@@ -73,268 +75,52 @@ export function findTargetNetwork(state: State, identifier?: string): any | null
   return target || null
 }
 
-export function inferMimeType(name: string, fallbackMime: string | null): string {
-  if (fallbackMime && fallbackMime !== 'application/octet-stream') return fallbackMime
-  const ext = name.split('.').pop()?.toLowerCase() || ''
-  switch (ext) {
-    // Images
-    case 'png': return 'image/png'
-    case 'jpg':
-    case 'jpeg':
-    case 'jpe':
-    case 'jfif':
-    case 'pjpeg':
-    case 'pjp': return 'image/jpeg'
-    case 'gif': return 'image/gif'
-    case 'webp': return 'image/webp'
-    case 'svg':
-    case 'svgz': return 'image/svg+xml'
-    case 'bmp':
-    case 'dib': return 'image/bmp'
-    case 'ico':
-    case 'cur': return 'image/x-icon'
-    case 'avif': return 'image/avif'
-    case 'apng': return 'image/apng'
-    case 'tif':
-    case 'tiff': return 'image/tiff'
-
-    // Videos
-    case 'mp4':
-    case 'm4v': return 'video/mp4'
-    case 'webm': return 'video/webm'
-    case 'mkv': return 'video/webm' // EBML container compatibility in Chromium
-    case 'mov':
-    case 'qt': return 'video/mp4'
-    case 'ogv': return 'video/ogg'
-    case 'avi': return 'video/x-msvideo'
-    case 'wmv': return 'video/x-ms-wmv'
-    case 'flv':
-    case 'f4v': return 'video/x-flv'
-    case 'm2ts': return 'video/mp2t'
-    case '3gp': return 'video/3gpp'
-    case '3g2': return 'video/3gpp2'
-    case 'mpg':
-    case 'mpeg':
-    case 'mpe':
-    case 'mpv':
-    case 'm2v':
-    case 'vob': return 'video/mpeg'
-
-    // Audio
-    case 'mp3': return 'audio/mpeg'
-    case 'wav':
-    case 'wave': return 'audio/wav'
-    case 'ogg':
-    case 'oga':
-    case 'opus': return 'audio/ogg'
-    case 'aac': return 'audio/aac'
-    case 'm4a': return 'audio/mp4'
-    case 'flac': return 'audio/flac'
-    case 'weba': return 'audio/webm'
-    case 'wma': return 'audio/x-ms-wma'
-    case 'aiff':
-    case 'aif':
-    case 'aifc': return 'audio/aiff'
-    case 'mid':
-    case 'midi': return 'audio/midi'
-    case 'amr': return 'audio/amr'
-    case 'ac3': return 'audio/ac3'
-    case 'eac3': return 'audio/eac3'
-
-    // PDF
-    case 'pdf': return 'application/pdf'
-
-    // Text & Code
-    case 'txt':
-    case 'text':
-    case 'log':
-    case 'err':
-    case 'out':
-    case 'msg':
-    case 'nfo':
-    case 'rtf':
-    case 'conf':
-    case 'cfg':
-    case 'ini':
-    case 'env':
-    case 'properties':
-    case 'gitignore':
-    case 'gitattributes':
-    case 'dockerignore':
-    case 'editorconfig': return 'text/plain'
-
-    case 'md':
-    case 'markdown':
-    case 'mdown':
-    case 'mkdn':
-    case 'rst':
-    case 'tex':
-    case 'asciidoc':
-    case 'adoc': return 'text/markdown'
-
-    case 'json':
-    case 'jsonc':
-    case 'json5': return 'application/json'
-
-    case 'js':
-    case 'mjs':
-    case 'cjs': return 'text/javascript'
-
-    case 'ts':
-    case 'mts':
-    case 'cts':
-    case 'tsx':
-    case 'jsx': return 'text/typescript'
-
-    case 'html':
-    case 'htm':
-    case 'xhtml':
-    case 'shtml':
-    case 'vue':
-    case 'svelte': return 'text/html'
-
-    case 'css':
-    case 'scss':
-    case 'sass':
-    case 'less': return 'text/css'
-
-    case 'csv':
-    case 'tsv':
-    case 'tab': return 'text/csv'
-
-    case 'py':
-    case 'pyw':
-    case 'ipynb': return 'text/x-python'
-
-    case 'sh':
-    case 'bash':
-    case 'zsh':
-    case 'ksh':
-    case 'csh':
-    case 'tcsh':
-    case 'fish':
-    case 'bat':
-    case 'cmd':
-    case 'ps1':
-    case 'psm1': return 'text/x-sh'
-
-    case 'rs': return 'text/rust'
-    case 'go': return 'text/x-go'
-    case 'c':
-    case 'h': return 'text/x-c'
-    case 'cpp':
-    case 'cc':
-    case 'cxx':
-    case 'hpp':
-    case 'hxx': return 'text/x-c++'
-    case 'cs':
-    case 'csx': return 'text/x-csharp'
-    case 'java':
-    case 'kt':
-    case 'kts': return 'text/x-java'
-    case 'swift': return 'text/x-swift'
-    case 'd': return 'text/x-d'
-    case 'dart': return 'text/x-dart'
-    case 'lua': return 'text/x-lua'
-    case 'pl':
-    case 'pm': return 'text/x-perl'
-    case 'r':
-    case 'rmd': return 'text/x-r'
-    case 'sql': return 'text/x-sql'
-    case 'rb': return 'text/x-ruby'
-    case 'php':
-    case 'phtml': return 'text/x-php'
-    case 'xml': return 'text/xml'
-    case 'yaml':
-    case 'yml': return 'text/yaml'
-    case 'toml': return 'text/x-toml'
-    case 'diff':
-    case 'patch': return 'text/x-diff'
-    case 'proto': return 'text/x-protobuf'
-    case 'graphql':
-    case 'gql': return 'text/x-graphql'
-    case 'zig': return 'text/x-zig'
-    case 'nim': return 'text/x-nim'
-    case 'clj':
-    case 'cljs':
-    case 'edn': return 'text/x-clojure'
-    case 'ex':
-    case 'exs': return 'text/x-elixir'
-    case 'erl':
-    case 'hrl': return 'text/x-erlang'
-    case 'hs':
-    case 'lhs': return 'text/x-haskell'
-    case 'ml':
-    case 'mli': return 'text/x-ocaml'
-    case 'fs':
-    case 'fsi':
-    case 'fsx': return 'text/x-fsharp'
-    case 'v':
-    case 'sv':
-    case 'vhd':
-    case 'vhdl': return 'text/x-hdl'
-    case 'asm':
-    case 's': return 'text/x-asm'
-
-    default: return fallbackMime || 'application/octet-stream'
-  }
-}
-
-function isBufferText(buf: Uint8Array): boolean {
-  const len = Math.min(buf.byteLength, 4096)
-  if (len === 0) return true
-  for (let i = 0; i < len; i++) {
-    if (buf[i] === 0) return false
-  }
-  try {
-    const dec = new TextDecoder('utf-8', { fatal: true })
-    dec.decode(buf.subarray(0, len))
-    return true
-  } catch {
-    return false
-  }
-}
-
 export function createRpcHandlers(
   state: State,
   swarm: any,
   storageDir: string,
   publicCatalog: any,
   emit: (msg: unknown) => void
-): Record<string, (params: any) => Promise<any>> {
+) {
   return {
-    async getStatus() {
+    async ping() {
+      return 'pong'
+    },
+
+    async getStatus(_params: Record<string, unknown> = {}) {
       return statusPayload(state)
     },
 
     async createNetwork({ name }: { name?: string } = {}) {
-      let primaryKey = state.primaryKey
-      let encryptionKey = state.encryptionKey
-      if (!primaryKey || !encryptionKey) {
-        const acct = createAccount()
-        primaryKey = acct.primaryKey
-        encryptionKey = acct.encryptionKey
-      }
-
-      const { networkKeyHex, networkLink } = createNetworkKey(name)
+      const { networkKeyHex } = createNetworkKey(name)
       const derived = deriveNetworkKeys(networkKeyHex, name)
+      if (!state.primaryKey || !state.encryptionKey) throw new Error('Not unlocked.')
       await openVault(state, swarm, storageDir, publicCatalog, {
-        primaryKey,
-        encryptionKey,
+        primaryKey: state.primaryKey,
+        encryptionKey: state.encryptionKey,
         networkKeyHex,
-        networkLink,
+        networkLink: derived.networkLink,
         swarmTopic: derived.swarmTopic,
         swarmChunkTopic: derived.swarmChunkTopic,
         topicHex: derived.topicHex,
         netName: name
       })
-      return { status: statusPayload(state), networkLink, networkKeyHex }
+      return { status: statusPayload(state), networkLink: derived.networkLink, networkKeyHex }
     },
 
-    async joinNetwork({ link, name }: { link: string; name?: string }) {
-      if (!link) throw new Error('Enter a valid network invite link.')
-      let primaryKey = state.primaryKey
-      let encryptionKey = state.encryptionKey
+    async joinNetwork({
+      link,
+      name,
+      primaryKey: overridePrimaryKey,
+      encryptionKey: overrideEncryptionKey
+    }: {
+      link: string
+      name?: string
+      primaryKey?: Uint8Array
+      encryptionKey?: Uint8Array
+    }) {
+      let primaryKey = overridePrimaryKey || state.primaryKey
+      let encryptionKey = overrideEncryptionKey || state.encryptionKey
       if (!primaryKey || !encryptionKey) {
         const acct = createAccount()
         primaryKey = acct.primaryKey
@@ -390,8 +176,8 @@ export function createRpcHandlers(
 
       const handles = state.joinedTopics.get(netId)
       if (handles) {
-        await handles.networkDiscovery.destroy().catch(() => { })
-        await handles.chunkDiscovery.destroy().catch(() => { })
+        await handles.networkDiscovery.destroy().catch(() => {})
+        await handles.chunkDiscovery.destroy().catch(() => {})
         state.joinedTopics.delete(netId)
       }
       if (state.chunkStore) {
@@ -499,55 +285,7 @@ export function createRpcHandlers(
     async preview({ path: entryPath }: { path: string }) {
       if (!state.vault) throw new Error('Not unlocked')
       const { buffer, mime: rawMime, name } = await state.vault.readBuffer(entryPath)
-      const mime = inferMimeType(name, rawMime)
-      const ext = name.split('.').pop()?.toLowerCase() || ''
-
-      const isImage = mime.startsWith('image/') || /\.(png|jpe?g|jpe|jfif|pjpeg|pjp|gif|webp|svg|svgz|bmp|dib|ico|cur|avif|apng|tif|tiff)$/i.test(name)
-      const isVideo = mime.startsWith('video/') || /\.(mp4|m4v|mkv|webm|mov|qt|avi|wmv|flv|f4v|ts|m2ts|mts|3gp|3g2|ogv|ogg|mpg|mpeg|mpe|mpv|m2v|vob)$/i.test(name)
-      const isAudio = mime.startsWith('audio/') || /\.(mp3|wav|wave|ogg|oga|opus|aac|flac|m4a|weba|wma|aiff|aif|aifc|mid|midi|amr|ac3|eac3)$/i.test(name)
-      const isPdf = mime === 'application/pdf' || ext === 'pdf'
-
-      const isTextByExt = mime.startsWith('text/') || mime === 'application/json' || /\.(txt|text|log|err|out|msg|nfo|rtf|conf|cfg|ini|env|properties|gitignore|gitattributes|dockerignore|editorconfig|md|markdown|mdown|mkdn|rst|tex|asciidoc|adoc|json|jsonc|json5|js|mjs|cjs|ts|mts|cts|tsx|jsx|html|htm|xhtml|shtml|vue|svelte|css|scss|sass|less|csv|tsv|tab|py|pyw|ipynb|sh|bash|zsh|ksh|csh|tcsh|fish|bat|cmd|ps1|psm1|rs|go|c|h|cpp|cc|cxx|hpp|hxx|cs|csx|java|kt|kts|swift|d|dart|lua|pl|pm|r|rmd|sql|rb|php|phtml|xml|yaml|yml|toml|diff|patch|proto|graphql|gql|zig|nim|clj|cljs|edn|ex|exs|erl|hrl|hs|lhs|ml|mli|fs|fsi|fsx|v|sv|vhd|vhdl|asm|s)$/i.test(name)
-
-      const isText = isTextByExt || isBufferText(buffer)
-
-      const supported = isImage || isVideo || isAudio || isPdf || isText
-
-      if (!supported) {
-        return {
-          supported: false,
-          mime,
-          name,
-          byteLength: buffer.byteLength
-        }
-      }
-
-      if (isText) {
-        let textContent: string
-        try {
-          textContent = b4a.toString(buffer, 'utf-8')
-        } catch {
-          textContent = ''
-        }
-        return {
-          supported: true,
-          isText: true,
-          content: textContent,
-          mime: mime.startsWith('text/') ? mime : 'text/plain',
-          name,
-          byteLength: buffer.byteLength
-        }
-      }
-
-      const base64Data = b4a.toString(buffer, 'base64')
-      return {
-        supported: true,
-        isText: false,
-        data: base64Data,
-        mime,
-        name,
-        byteLength: buffer.byteLength
-      }
+      return formatFilePreview({ buffer, rawMime, name })
     },
 
     async delete({ path: entryPath }: { path: string }) {
@@ -565,7 +303,7 @@ export function createRpcHandlers(
     async setBlindPeers({ keys }: { keys: string[] }) {
       state.settings.blindPeerKeys = normalizeBlindKeys(keys)
       await saveSettings(storageDir, state.settings)
-      if (state.blinds) await state.blinds.close().catch(() => { })
+      if (state.blinds) await state.blinds.close().catch(() => {})
       if (state.vaultStore) {
         state.blinds = createBlindClient(swarm, state.vaultStore, state.settings.blindPeerKeys)
         if (state.vault?.drive) {

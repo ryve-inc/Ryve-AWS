@@ -4,6 +4,7 @@ import { EventEmitter } from 'node:events'
 import PearRuntime from 'pear-runtime'
 import FramedStream from 'framed-stream'
 import type { AppStatus, StorageInfo } from '../shared/types'
+import { bootstrapNodeIdentity } from './identity-bootstrap'
 
 export interface WorkerBridgeOptions {
   storageDir: string
@@ -20,6 +21,19 @@ export interface JoinNetworkResult {
   networkLink: string
   allocatedBytes: number
   allocatedGb: number
+  status: AppStatus
+}
+
+export interface ResizeNetworkResult {
+  networkId: string
+  networkKeyHex: string
+  allocatedBytes: number
+  status: AppStatus
+}
+
+export interface LeaveNetworkResult {
+  networkId: string
+  networkKeyHex: string
   status: AppStatus
 }
 
@@ -43,7 +57,6 @@ export class WorkerBridge extends EventEmitter {
     }
   >()
 
-  private isReady = false
   private isUnlocked = false
   private currentStatus: AppStatus | null = null
   private readyPromise: Promise<void>
@@ -90,16 +103,12 @@ export class WorkerBridge extends EventEmitter {
 
     this.worker.stdout.on('data', (chunk: Buffer) => {
       const text = chunk.toString().trim()
-      if (text) {
-        console.log(`[RyveCore] ${text}`)
-      }
+      if (text) console.log(`[RyveCore] ${text}`)
     })
 
     this.worker.stderr.on('data', (chunk: Buffer) => {
       const text = chunk.toString().trim()
-      if (text) {
-        console.error(`[RyveCore:Err] ${text}`)
-      }
+      if (text) console.error(`[RyveCore:Err] ${text}`)
     })
 
     this.worker.on('exit', (code: number) => {
@@ -139,15 +148,9 @@ export class WorkerBridge extends EventEmitter {
 
     // Handle Worker Push Events
     if (msg.type === 'event') {
-      if (this.verbose) {
-        console.log(`[WorkerBridge:Event] ${msg.name}`)
-      }
+      if (this.verbose) console.log(`[WorkerBridge:Event] ${msg.name}`)
 
       switch (msg.name) {
-        case 'ready':
-          this.isReady = true
-          break
-
         case 'status':
           if (msg.data) {
             this.currentStatus = msg.data as AppStatus
@@ -169,61 +172,17 @@ export class WorkerBridge extends EventEmitter {
       if (this.verbose) {
         console.log('[WorkerBridge] Node identity uninitialized. Initializing autonomous credentials...')
       }
-      await this.bootstrapIdentity()
+      const res = await bootstrapNodeIdentity(
+        this.storageDir,
+        this.nodeDisplayName,
+        this.callRpc.bind(this),
+        this.verbose
+      )
+      this.currentStatus = res.status
     } else {
-      this.isUnlocked = true
-      this.isReady = true
-      if (data?.status) {
-        this.currentStatus = data.status
-      }
-      this.readyResolver()
+      if (data?.status) this.currentStatus = data.status
     }
-  }
-
-  private async bootstrapIdentity(): Promise<void> {
-    const credsPath = path.join(this.storageDir, 'node-identity.json')
-    let mnemonic = ''
-
-    if (fs.existsSync(credsPath)) {
-      try {
-        const parsed = JSON.parse(fs.readFileSync(credsPath, 'utf8'))
-        if (parsed?.mnemonic) {
-          mnemonic = parsed.mnemonic
-        }
-      } catch (err) {
-        console.warn('[WorkerBridge] Failed to read existing credentials file:', err)
-      }
-    }
-
-    if (!mnemonic) {
-      const acct = await this.callRpc<{ mnemonic: string; previewIdentity: string }>('createAccount', {})
-      mnemonic = acct.mnemonic
-      const payload = {
-        identity: acct.previewIdentity,
-        mnemonic,
-        createdAt: new Date().toISOString(),
-        displayName: this.nodeDisplayName
-      }
-      fs.writeFileSync(credsPath, JSON.stringify(payload, null, 2), { mode: 0o600 })
-      console.log(`[WorkerBridge] Generated new node identity: ${acct.previewIdentity}`)
-      console.log(`[WorkerBridge] Node credentials saved to: ${credsPath}`)
-
-      const confirmRes = await this.callRpc<{ status: AppStatus }>('confirmCreateAccount', {
-        mnemonic,
-        displayName: this.nodeDisplayName
-      })
-      this.currentStatus = confirmRes.status
-    } else {
-      console.log('[WorkerBridge] Unlocking node with saved credentials...')
-      const unlockRes = await this.callRpc<{ status: AppStatus }>('unlock', {
-        mnemonic,
-        displayName: this.nodeDisplayName
-      })
-      this.currentStatus = unlockRes.status
-    }
-
     this.isUnlocked = true
-    this.isReady = true
     this.readyResolver()
   }
 
@@ -282,30 +241,27 @@ export class WorkerBridge extends EventEmitter {
     const networkId = networkKeyHex.slice(0, 12)
 
     // 2. Set storage allocation for this specific network
-    const allocRes = await this.callRpc<AppStatus>('setNetworkStorageAllocation', {
+    const allocRes = await this.callRpc<any>('setNetworkStorageAllocation', {
       id: networkId,
+      networkLink,
       allocatedBytes
     })
 
-    this.currentStatus = allocRes
+    this.currentStatus = allocRes.status || allocRes
+    const finalAllocated = allocRes.allocatedBytes || allocatedBytes
 
     return {
       success: true,
       networkId,
       networkKeyHex,
       networkLink: joinRes.networkLink,
-      allocatedBytes,
-      allocatedGb: Math.round((allocatedBytes / (1024 * 1024 * 1024)) * 100) / 100,
-      status: allocRes
+      allocatedBytes: finalAllocated,
+      allocatedGb: Math.round((finalAllocated / (1024 * 1024 * 1024)) * 100) / 100,
+      status: this.currentStatus!
     }
   }
 
-  async resizeNetwork(networkIdentifier: string, allocatedBytes: number): Promise<{
-    networkId: string
-    networkKeyHex: string
-    allocatedBytes: number
-    status: AppStatus
-  }> {
+  async resizeNetwork(networkIdentifier: string, allocatedBytes: number): Promise<ResizeNetworkResult> {
     console.log(`[WorkerBridge] Resizing network '${networkIdentifier.slice(0, 30)}...' to ${(allocatedBytes / 1e9).toFixed(2)} GB`)
     const res = await this.callRpc<{
       ok: boolean
@@ -328,11 +284,7 @@ export class WorkerBridge extends EventEmitter {
     }
   }
 
-  async leaveNetwork(networkIdentifier: string): Promise<{
-    networkId: string
-    networkKeyHex: string
-    status: AppStatus
-  }> {
+  async leaveNetwork(networkIdentifier: string): Promise<LeaveNetworkResult> {
     console.log(`[WorkerBridge] Leaving network: '${networkIdentifier.slice(0, 30)}...'`)
     const res = await this.callRpc<{
       ok: boolean
