@@ -12,9 +12,7 @@
   "scripts": {
     "build": "tsx scripts/build.ts",
     "start": "node dist/daemon/index.js",
-    "dev": "tsx src/daemon/index.ts",
-    "lint": "prettier --check .",
-    "format": "prettier --write ."
+    "dev": "tsx src/daemon/index.ts"
   },
   "dependencies": {
     "@digitaldefiance/reed-solomon-erasure.wasm": "^1.0.2",
@@ -40,8 +38,6 @@
   "devDependencies": {
     "@types/node": "^24.0.15",
     "esbuild": "^0.25.6",
-    "prettier": "^3.8.1",
-    "prettier-config-holepunch": "^2.0.0",
     "tsx": "^4.23.1",
     "typescript": "^5.8.3"
   }
